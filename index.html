@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>APMO動態管理系統2025-2026版</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Import Map -->
+    <script type="importmap">
+    {
+        "imports": {
+            "react": "https://esm.sh/react@18.2.0",
+            "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+            "lucide-react": "https://esm.sh/lucide-react@0.292.0",
+            "firebase/app": "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js",
+            "firebase/firestore": "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js"
+        }
+    }
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@500&display=swap');
+
+        body { font-family: 'Noto Sans TC', sans-serif; }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(12px);
+        }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        .avatar-circle {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+        }
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #4f46e5;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen text-slate-800 selection:bg-indigo-100">
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect, useMemo } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { 
+            User, Briefcase, Calendar, Plane, Home, Clock, Plus, X, 
+            ChevronLeft, ChevronRight, LayoutGrid, List, CalendarDays, Edit3, Settings, Trash2, Save, CalendarRange, AlertCircle, Cloud, RefreshCw, CalendarCheck, Coffee
+        } from 'lucide-react';
+        
+        import { initializeApp } from "firebase/app";
+        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, writeBatch } from "firebase/firestore";
+
+        // ==========================================
+        // 🔥 設定區 (您的 Firebase 設定) 🔥
+        // ==========================================
+        const firebaseConfig = {
+          apiKey: "AIzaSyCSfljgqFZHv7iP-CwXZl0cuYX350yyXao",
+          authDomain: "teamschedule-7feee.firebaseapp.com",
+          projectId: "teamschedule-7feee",
+          storageBucket: "teamschedule-7feee.firebasestorage.app",
+          messagingSenderId: "608682561982",
+          appId: "1:608682561982:web:56aebc3b128633c10e69ef",
+          measurementId: "G-CBTDEWTRW1"
+        };
+
+        // 初始化 Firebase
+        let db;
+        try {
+            if (firebaseConfig.apiKey && !firebaseConfig.apiKey.includes("請填入")) {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+            }
+        } catch (e) { console.error("Firebase init error:", e); }
+
+        // --- 常數設定 ---
+        const WORK_START_HOUR = 8;
+        const WORK_END_HOUR = 17; 
+
+        const TIME_OPTIONS = [];
+        for (let h = WORK_START_HOUR; h <= 18; h++) {
+            const hourStr = h < 10 ? `0${h}` : `${h}`;
+            TIME_OPTIONS.push(`${hourStr}:00`);
+            if (h < 18) TIME_OPTIONS.push(`${hourStr}:30`);
+        }
+
+        const STATUS_TYPES = {
+            office: { id: 'office', label: '出勤', color: 'bg-white text-emerald-600 border-emerald-200 ring-1 ring-emerald-100', circle: 'bg-emerald-50 text-emerald-600 border border-emerald-200', icon: User },
+            meeting: { id: 'meeting', label: '會議', color: 'bg-blue-50 text-blue-700 border-blue-200', circle: 'bg-blue-500 text-white', icon: Briefcase },
+            trip: { id: 'trip', label: '出差', color: 'bg-orange-50 text-orange-700 border-orange-200', circle: 'bg-orange-500 text-white', icon: Plane },
+            leave: { id: 'leave', label: '休假', color: 'bg-rose-50 text-rose-700 border-rose-200', circle: 'bg-rose-500 text-white', icon: Home },
+            break: { id: 'break', label: '下班/休假', color: 'bg-slate-50 text-slate-400 border-slate-200', circle: 'bg-slate-200 text-slate-400', icon: Clock },
+        };
+
+        const SPECIAL_TYPES = ['meeting', 'trip', 'leave'];
+
+        // 🔥 2025-2026 台灣國定假日表 🔥
+        const TAIWAN_HOLIDAYS = {
+            // --- 2025 ---
+            '2025-01-01': '元旦',
+            '2025-01-25': '春節', '2025-01-26': '春節', '2025-01-27': '春節', '2025-01-28': '春節', '2025-01-29': '春節', '2025-01-30': '春節', '2025-01-31': '春節', '2025-02-01': '春節', '2025-02-02': '春節',
+            '2025-02-28': '228紀念日', '2025-03-01': '228連假', '2025-03-02': '228連假',
+            '2025-04-03': '兒童節', '2025-04-04': '清明節', '2025-04-05': '清明連假', '2025-04-06': '清明連假',
+            '2025-05-30': '端午連假', '2025-05-31': '端午連假', '2025-06-01': '端午節',
+            '2025-10-04': '中秋連假', '2025-10-05': '中秋連假', '2025-10-06': '中秋節',
+            '2025-10-10': '國慶日', '2025-10-11': '國慶連假', '2025-10-12': '國慶連假',
+
+            // --- 2026 (依據行政院人事總處預估/新聞資料) ---
+            '2026-01-01': '元旦',
+            '2026-02-14': '春節連假', '2026-02-15': '春節連假', '2026-02-16': '除夕', '2026-02-17': '春節', '2026-02-18': '春節', '2026-02-19': '春節', '2026-02-20': '春節補假', '2026-02-21': '春節連假', '2026-02-22': '春節連假',
+            '2026-02-27': '228補假', '2026-02-28': '228紀念日', '2026-03-01': '228連假',
+            '2026-04-03': '兒童節補假', '2026-04-04': '兒童節', '2026-04-05': '清明節', '2026-04-06': '清明節補假',
+            '2026-05-01': '勞動節', '2026-05-02': '勞動節連假', '2026-05-03': '勞動節連假',
+            '2026-06-19': '端午節', '2026-06-20': '端午連假', '2026-06-21': '端午連假',
+            '2026-09-25': '中秋節', '2026-09-26': '中秋連假', '2026-09-27': '中秋連假', '2026-09-28': '教師節連假', 
+            '2026-10-09': '國慶補假', '2026-10-10': '國慶日', '2026-10-11': '國慶連假',
+            '2026-10-24': '光復節連假', '2026-10-25': '光復節', '2026-10-26': '光復節補假',
+            '2026-12-25': '行憲紀念日', '2026-12-26': '連假', '2026-12-27': '連假'
+        };
+
+        // 🔥 補班日 (2026 全面取消補班，故僅保留 2025 資料) 🔥
+        const MAKEUP_WORKDAYS = ['2025-02-08'];
+
+        // --- 輔助函數 ---
+        const splitIsoString = (isoStr) => {
+            if (!isoStr) return { datePart: '', timePart: '' };
+            const date = new Date(isoStr);
+            const pad = (n) => n < 10 ? '0' + n : n;
+            const datePart = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+            const timePart = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+            return { datePart, timePart };
+        };
+
+        const formatTime24 = (dateStr) => {
+            const d = new Date(dateStr);
+            const pad = (n) => n < 10 ? '0' + n : n;
+            return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        };
+
+        const isSameDay = (d1, d2) => d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
+        
+        const isDateInRange = (checkDate, startStr, endStr) => {
+            const check = new Date(checkDate); check.setHours(0,0,0,0);
+            const start = new Date(startStr); start.setHours(0,0,0,0);
+            const end = new Date(endStr); end.setHours(0,0,0,0);
+            return check.getTime() >= start.getTime() && check.getTime() <= end.getTime();
+        };
+
+        // 取得日期字串 YYYY-MM-DD
+        const getDateString = (date) => {
+            const pad = (n) => n < 10 ? '0' + n : n;
+            return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+        };
+
+        // 🔥 核心：判斷是否為「非工作日」 (含週末與國定假日，排除補班日)
+        const isDayOff = (date) => {
+            const dateStr = getDateString(date);
+            
+            // 1. 補班日 -> 視為工作日 (return false)
+            if (MAKEUP_WORKDAYS.includes(dateStr)) return false;
+
+            // 2. 國定假日 -> 視為休假 (return holiday name)
+            if (TAIWAN_HOLIDAYS[dateStr]) return TAIWAN_HOLIDAYS[dateStr];
+
+            // 3. 一般週末 -> 視為休假
+            const day = date.getDay();
+            if (day === 0 || day === 6) return '週末';
+
+            return false; // 是工作日
+        };
+
+        function App() {
+            const [members, setMembers] = useState([]);
+            const [schedules, setSchedules] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [dbError, setDbError] = useState(null);
+
+            const [currentView, setCurrentView] = useState('dashboard'); 
+            const [viewDate, setViewDate] = useState(new Date()); 
+            
+            const [isManageModalOpen, setIsManageModalOpen] = useState(false);
+            const [isMemberEditModalOpen, setIsMemberEditModalOpen] = useState(false);
+            const [targetMember, setTargetMember] = useState(null); 
+            const [modalMode, setModalMode] = useState('list');
+            
+            const [statusForm, setStatusForm] = useState({ id: null, type: 'meeting', startDate: '', startTime: '08:00', endDate: '', endTime: '17:00', note: '' });
+            const [memberForm, setMemberForm] = useState({ name: '', role: '' });
+
+            useEffect(() => {
+                if (!db) { setDbError("Firebase 設定錯誤。"); setLoading(false); return; }
+                const unsubMembers = onSnapshot(query(collection(db, "members"), orderBy("orderId")), (snapshot) => {
+                    const loadedMembers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    setMembers(loadedMembers); setLoading(false);
+                }, (error) => { setDbError("無法讀取資料庫，請確認 Rules。"); });
+                const unsubSchedules = onSnapshot(collection(db, "schedules"), (snapshot) => {
+                    const loadedSchedules = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    setSchedules(loadedSchedules);
+                }, (error) => console.error("Schedules fetch error:", error));
+                return () => { unsubMembers(); unsubSchedules(); };
+            }, []);
+
+            const initializeDb = async () => {
+                if (!db || members.length > 0) return;
+                setLoading(true); const batch = writeBatch(db);
+                for (let i = 1; i <= 12; i++) { const docRef = doc(collection(db, "members")); batch.set(docRef, { orderId: i, name: `成員${i}`, role: i === 1 ? '主管' : '專員' }); }
+                try { await batch.commit(); alert("初始化完成！"); } catch (e) { alert("初始化失敗: " + e.message); } setLoading(false);
+            };
+
+            const getMemberCurrentStatus = (memberId, time) => {
+                const checkTime = time.getTime();
+                const currentSchedules = schedules.filter(s => s.memberId === memberId && new Date(s.start).getTime() <= checkTime && new Date(s.end).getTime() > checkTime);
+                if (currentSchedules.length > 0) return { ...currentSchedules[currentSchedules.length - 1], isDefault: false };
+                
+                // 檢查是否為放假日
+                const holidayName = isDayOff(time);
+                if (holidayName) return { type: 'break', note: holidayName, isDefault: true };
+
+                const hour = time.getHours();
+                const isWorkTime = hour >= WORK_START_HOUR && hour < WORK_END_HOUR;
+                if (isWorkTime) return { type: 'office', note: '在位子上', isDefault: true };
+                return { type: 'break', note: '非辦公時間', isDefault: true };
+            };
+
+            const getMemberDaySchedules = (memberId, date) => schedules.filter(s => s.memberId === memberId && isDateInRange(date, s.start, s.end));
+
+            const handleEditMember = (member) => { setTargetMember(member); setMemberForm({ name: member.name, role: member.role }); setIsMemberEditModalOpen(true); };
+            const saveMemberInfo = async (e) => {
+                e.preventDefault(); if (!db) return;
+                try { const memberRef = doc(db, "members", targetMember.id); await updateDoc(memberRef, { name: memberForm.name, role: memberForm.role }); setIsMemberEditModalOpen(false); } catch (err) { alert("更新失敗: " + err.message); }
+            };
+
+            const openManageModal = (member, mode = 'list', baseDate = viewDate) => {
+                setTargetMember(member); setModalMode(mode);
+                const pad = (n) => n < 10 ? '0' + n : n; const defaultDateStr = `${baseDate.getFullYear()}-${pad(baseDate.getMonth() + 1)}-${pad(baseDate.getDate())}`;
+                setStatusForm({ id: null, type: 'trip', startDate: defaultDateStr, startTime: '08:00', endDate: defaultDateStr, endTime: '17:00', note: '' });
+                setIsManageModalOpen(true);
+            };
+
+            const loadScheduleToForm = (schedule) => {
+                const start = splitIsoString(schedule.start); const end = splitIsoString(schedule.end);
+                setStatusForm({ id: schedule.id, type: schedule.type, startDate: start.datePart, startTime: start.timePart, endDate: end.datePart, endTime: end.timePart, note: schedule.note || '' });
+                setModalMode('add'); 
+            };
+
+            const saveStatus = async (e) => {
+                e.preventDefault(); if (!db) return;
+                
+                // 🔥 行事曆驗證 🔥
+                const startD = new Date(statusForm.startDate);
+                const endD = new Date(statusForm.endDate);
+                
+                const startHoliday = isDayOff(startD);
+                const endHoliday = isDayOff(endD);
+
+                if (startHoliday) { alert(`⚠️ 無法排程：${statusForm.startDate} 是「${startHoliday}」。`); return; }
+                if (endHoliday) { alert(`⚠️ 無法排程：${statusForm.endDate} 是「${endHoliday}」。`); return; }
+
+                const startIso = `${statusForm.startDate}T${statusForm.startTime}:00`;
+                const endIso = `${statusForm.endDate}T${statusForm.endTime}:00`;
+                if (new Date(startIso) >= new Date(endIso)) { alert("⚠️ 結束時間必須晚於開始時間"); return; }
+                
+                const scheduleData = { memberId: targetMember.id, type: statusForm.type, start: startIso, end: endIso, note: statusForm.note };
+                try {
+                    if (statusForm.id) { await updateDoc(doc(db, "schedules", statusForm.id), scheduleData); setModalMode('list'); } 
+                    else { await addDoc(collection(db, "schedules"), scheduleData); alert("✅ 行程已同步！"); setStatusForm(prev => ({ ...prev, note: '' })); }
+                } catch (err) { alert("儲存失敗: " + err.message); }
+            };
+
+            const deleteSchedule = async (id) => { if (confirm('確定刪除？')) { try { await deleteDoc(doc(db, "schedules", id)); if (statusForm.id === id) setModalMode('list'); } catch (err) { alert("刪除失敗: " + err.message); } } };
+
+            const MiniMonthGrid = ({ member }) => {
+                const year = viewDate.getFullYear(); const month = viewDate.getMonth();
+                const daysInMonth = new Date(year, month + 1, 0).getDate();
+                const days = Array.from({ length: daysInMonth }, (_, i) => {
+                    const day = i + 1; const date = new Date(year, month, day); const isToday = isSameDay(date, new Date());
+                    const daySchedules = getMemberDaySchedules(member.id, date);
+                    const event = daySchedules.find(s => SPECIAL_TYPES.includes(s.type)) || daySchedules[0];
+                    const holiday = isDayOff(date);
+                    return { day, event, isToday, holiday };
+                });
+                return (
+                    <div className="mt-3 pt-3 border-t border-slate-100">
+                        <div className="flex justify-between items-end mb-1"><span className="text-[10px] text-slate-400 font-bold uppercase">{month + 1}月</span></div>
+                        <div className="flex flex-wrap gap-0.5">
+                            {days.map((d) => {
+                                let bgClass = "bg-slate-200"; 
+                                if (d.holiday) bgClass = "bg-red-50 opacity-40"; // 國定假日/週末淡紅
+                                if (d.event) {
+                                    if (d.event.type === 'trip') bgClass = "bg-orange-400 opacity-100";
+                                    else if (d.event.type === 'leave') bgClass = "bg-rose-400 opacity-100";
+                                    else if (d.event.type === 'meeting') bgClass = "bg-blue-400 opacity-100";
+                                } else if (!d.holiday) bgClass = "bg-emerald-200"; 
+                                return <div key={d.day} className={`w-2 h-2 rounded-full ${bgClass} ${d.isToday ? 'ring-1 ring-offset-1 ring-slate-400' : ''}`} title={`${d.day}日: ${d.holiday ? d.holiday : (d.event ? STATUS_TYPES[d.event.type].label : '出勤')}`}></div>;
+                            })}
+                        </div>
+                    </div>
+                );
+            };
+
+            if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-100 flex-col gap-4"><div className="loading-spinner"></div><p className="text-slate-500 text-sm">正在連線至雲端資料庫...</p></div>;
+            if (dbError) return <div className="min-h-screen flex items-center justify-center bg-slate-100 p-6"><div className="bg-white p-6 rounded-2xl shadow-xl max-w-lg text-center"><AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" /><h2 className="text-xl font-bold text-slate-800 mb-2">連線問題</h2><p className="text-slate-600 mb-4">{dbError}</p></div></div>;
+            if (members.length === 0) return <div className="min-h-screen flex items-center justify-center bg-slate-100"><div className="bg-white p-8 rounded-2xl shadow-xl text-center"><Cloud className="w-16 h-16 text-indigo-500 mx-auto mb-4" /><h2 className="text-2xl font-bold text-slate-800 mb-2">系統就緒</h2><p className="text-slate-500 mb-6">資料庫是空的，請初始化。</p><button onClick={initializeDb} className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-lg hover:bg-indigo-700 transition flex items-center mx-auto gap-2"><RefreshCw className="w-5 h-5" /> 建立 12 位成員</button></div></div>;
+
+            const DashboardView = () => (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in fade-in zoom-in duration-300">
+                    {members.map(member => {
+                        const statusData = getMemberCurrentStatus(member.id, viewDate);
+                        const config = STATUS_TYPES[statusData.type];
+                        // 如果是國定假日，強制顯示假日名稱
+                        const holiday = isDayOff(viewDate);
+                        const displayNote = (holiday && statusData.isDefault) ? holiday : statusData.note;
+                        const displayLabel = (holiday && statusData.isDefault) ? '放假' : config.label;
+                        const displayIcon = (holiday && statusData.isDefault) ? Coffee : config.icon;
+                        const DisplayIconComp = displayIcon;
+
+                        return (
+                            <div key={member.id} className={`bg-white rounded-2xl p-4 border shadow-sm relative group hover:shadow-md transition-all ${config.color.replace('text-', 'border-').split(' ')[2]}`}>
+                                <button onClick={(e) => { e.stopPropagation(); openManageModal(member, 'add'); }} className="absolute top-2 right-2 w-8 h-8 flex items-center justify-center bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white rounded-full transition-colors z-10 shadow-sm"><Plus className="w-5 h-5" /></button>
+                                <button onClick={(e) => { e.stopPropagation(); handleEditMember(member); }} className="absolute top-2 right-12 p-1.5 text-slate-300 hover:text-slate-600 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"><Settings className="w-4 h-4" /></button>
+                                <div onClick={() => openManageModal(member, 'list')} className="cursor-pointer">
+                                    <div className="flex items-center mb-2"><div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg shadow-sm ${config.circle} border-0`}>{member.name.charAt(0)}</div><div className="ml-3"><h3 className="font-bold text-slate-800 text-base">{member.name}</h3><p className="text-xs text-slate-400">{member.role}</p></div></div>
+                                    <div className={`px-3 py-1.5 rounded-lg text-sm flex items-center justify-between mb-1 ${config.color}`}><div className="flex items-center gap-2"><DisplayIconComp className="w-4 h-4" /><span className="font-bold">{displayLabel}</span></div><span className="text-[10px] font-mono opacity-70">NOW</span></div>
+                                    <div className={`text-xs pl-1 h-4 truncate mb-1 ${holiday ? 'text-rose-500 font-bold' : 'text-slate-500'}`}>{displayNote}</div>
+                                    <MiniMonthGrid member={member} />
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            );
+
+            const DayView = () => {
+                const totalHours = WORK_END_HOUR + 1 - WORK_START_HOUR; 
+                const daySchedules = schedules.filter(s => isDateInRange(viewDate, s.start, s.end));
+                const holiday = isDayOff(viewDate);
+
+                return (
+                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden animate-in slide-in-from-right duration-300">
+                        <div className="flex border-b border-slate-100 bg-slate-50 justify-between items-center pr-4">
+                            <div className="flex flex-1">
+                                <div className="w-20 md:w-28 flex-shrink-0 p-3 text-xs font-bold text-slate-400 border-r border-slate-100">人員</div>
+                                <div className="flex-1 relative h-8">{Array.from({ length: totalHours + 1 }).map((_, i) => (<div key={i} className="absolute top-0 bottom-0 border-l border-slate-100 text-[10px] text-slate-400 pl-1 pt-2" style={{ left: `${(i / totalHours) * 100}%` }}>{WORK_START_HOUR + i}</div>))}</div>
+                            </div>
+                            {holiday && <div className="text-xs font-bold text-rose-500 px-3 py-1 bg-rose-50 rounded-full border border-rose-100">{holiday}</div>}
+                        </div>
+                        <div className="overflow-y-auto max-h-[65vh]">{members.map(member => {
+                            const mySchedules = daySchedules.filter(s => s.memberId === member.id);
+                            return (
+                                <div key={member.id} className={`flex border-b border-slate-100 group ${holiday ? 'bg-slate-50/50' : 'hover:bg-slate-50'}`}><div className="w-20 md:w-28 flex-shrink-0 p-3 border-r border-slate-100 flex items-center justify-between"><div className="text-sm font-bold text-slate-700 truncate">{member.name}</div><button onClick={() => openManageModal(member, 'add')} className="opacity-0 group-hover:opacity-100 text-indigo-500"><Plus className="w-4 h-4" /></button></div><div className="flex-1 relative h-12">{Array.from({ length: totalHours }).map((_, i) => <div key={i} className="absolute top-0 bottom-0 border-r border-slate-50" style={{ left: `${((i + 1) / totalHours) * 100}%`, width: '1px' }}></div>)}{!holiday && <div className="absolute top-1 bottom-1 bg-emerald-50/50" style={{ left: '0%', width: `${((17-8)/totalHours)*100}%` }}></div>}{mySchedules.map(sch => {
+                                    const start = new Date(sch.start); const end = new Date(sch.end);
+                                    let startH = isSameDay(start, viewDate) ? start.getHours() + start.getMinutes()/60 : WORK_START_HOUR; let endH = isSameDay(end, viewDate) ? end.getHours() + end.getMinutes()/60 : WORK_END_HOUR + 1;
+                                    const left = ((Math.max(startH, WORK_START_HOUR) - WORK_START_HOUR) / totalHours) * 100; const width = ((Math.min(endH, WORK_END_HOUR + 1) - Math.max(startH, WORK_START_HOUR)) / totalHours) * 100; if (width <= 0) return null;
+                                    return <div key={sch.id} onClick={() => { setTargetMember(member); loadScheduleToForm(sch); setIsManageModalOpen(true); }} className={`absolute top-2 bottom-2 rounded text-[10px] flex items-center px-2 overflow-hidden cursor-pointer hover:opacity-80 border shadow-sm z-10 ${STATUS_TYPES[sch.type].color}`} style={{ left: `${left}%`, width: `${width}%` }} title={sch.note}>{sch.note || STATUS_TYPES[sch.type].label}</div>
+                                })}</div></div>
+                            );
+                        })}</div>
+                    </div>
+                );
+            };
+
+            const WeekView = () => {
+                const startOfWeek = new Date(viewDate); startOfWeek.setDate(viewDate.getDate() - viewDate.getDay());
+                const weekDays = []; for(let i=0; i<7; i++) { const d = new Date(startOfWeek); d.setDate(startOfWeek.getDate() + i); weekDays.push(d); }
+                return (
+                    <div className="space-y-4 animate-in fade-in zoom-in duration-300">
+                        {weekDays.map(day => {
+                            const isToday = isSameDay(day, new Date());
+                            const holiday = isDayOff(day);
+                            const dayEvents = [];
+                            members.forEach(m => {
+                                const evs = getMemberDaySchedules(m.id, day);
+                                const relevant = evs.filter(e => SPECIAL_TYPES.includes(e.type));
+                                if(relevant.length > 0) dayEvents.push({ member: m, events: relevant });
+                            });
+                            if (dayEvents.length === 0 && holiday) return null; // 假日無事不顯示
+
+                            return (
+                                <div key={day.toISOString()} className={`rounded-xl shadow-sm border border-slate-200 overflow-hidden ${isToday ? 'bg-indigo-50 border-indigo-200' : 'bg-white'}`}>
+                                    <div className={`px-4 py-2 border-b border-slate-100 flex items-center justify-between ${isToday ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-50 text-slate-500'}`}>
+                                        <div className="flex items-center font-bold"><span className="mr-2 text-lg">{day.getDate()}</span><span className="text-sm">{['週日','週一','週二','週三','週四','週五','週六'][day.getDay()]}</span>{holiday && <span className="ml-2 text-xs bg-rose-100 text-rose-600 px-2 py-0.5 rounded border border-rose-200">{holiday}</span>}</div>{isToday && <span className="text-xs bg-white px-2 py-0.5 rounded-full font-bold text-indigo-600">今天</span>}
+                                    </div>
+                                    <div className="p-2 space-y-1">{dayEvents.length === 0 ? <div className="text-center text-xs text-slate-400 py-4">{holiday ? '放假' : '本日全員正常出勤'}</div> : dayEvents.map(item => (<div key={item.member.id} onClick={() => openManageModal(item.member, 'list', day)} className="flex items-start gap-3 p-2 hover:bg-black/5 rounded-lg cursor-pointer transition-colors group"><div className="flex items-center gap-2 w-24 flex-shrink-0"><div className={`w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-500`}>{item.member.name.charAt(0)}</div><span className="text-sm font-bold text-slate-700">{item.member.name}</span></div><div className="flex-1 flex flex-wrap gap-2">{item.events.map(ev => (<div key={ev.id} className={`flex items-center gap-2 px-2 py-1 rounded text-xs border ${STATUS_TYPES[ev.type].color}`}><span className="font-bold">{STATUS_TYPES[ev.type].label}</span><span className="font-mono opacity-80">{formatTime24(ev.start)}~{formatTime24(ev.end)}</span>{ev.note && <span className="text-slate-500 border-l border-slate-300 pl-2 ml-1">{ev.note}</span>}</div>))}</div><Edit3 className="w-4 h-4 text-slate-300 opacity-0 group-hover:opacity-100" /></div>))}</div>
+                                </div>
+                            )
+                        })}
+                    </div>
+                );
+            };
+
+            const MonthView = () => {
+                const year = viewDate.getFullYear(); const month = viewDate.getMonth();
+                const daysInMonth = new Date(year, month + 1, 0).getDate(); const startDayOfWeek = new Date(year, month, 1).getDay();
+                return (
+                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 animate-in fade-in zoom-in duration-300">
+                        <div className="flex items-center justify-between mb-4"><h2 className="text-lg font-bold text-slate-700">{year}年 {month + 1}月</h2><div className="text-xs text-slate-400 flex gap-2">{SPECIAL_TYPES.map(type => <div key={type} className="flex items-center gap-1"><div className={`w-2 h-2 rounded-full ${STATUS_TYPES[type].circle.split(' ')[0]}`}></div><span>{STATUS_TYPES[type].label}</span></div>)}</div></div>
+                        <div className="grid grid-cols-7 text-center mb-2 border-b border-slate-100 pb-2 text-xs font-bold text-slate-400">{['日', '一', '二', '三', '四', '五', '六'].map(d => <div key={d}>{d}</div>)}</div>
+                        <div className="grid grid-cols-7 gap-1">{Array.from({ length: startDayOfWeek }).map((_, i) => <div key={`e-${i}`} className="min-h-[80px] bg-slate-50/30 rounded"></div>)}{Array.from({ length: daysInMonth }).map((_, i) => {
+                            const date = new Date(year, month, i + 1); const isToday = isSameDay(date, new Date()); const holiday = isDayOff(date);
+                            return (
+                                <div key={i} className={`min-h-[80px] border rounded p-1 flex flex-col gap-1 ${isToday ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-slate-100'} ${holiday ? 'bg-slate-50/50' : ''}`}>
+                                    <div className="flex justify-between items-start"><span className={`text-[10px] font-bold ${isToday ? 'text-indigo-600' : 'text-slate-400'}`}>{i + 1}</span>{holiday && <span className="text-[9px] text-rose-500 font-bold">{holiday}</span>}</div>
+                                    <div className="flex flex-wrap gap-1 content-start">{members.map(member => {
+                                        const dayEvents = getMemberDaySchedules(member.id, date); const event = dayEvents.find(s=>SPECIAL_TYPES.includes(s.type)); if (!event) return null; const config = STATUS_TYPES[event.type];
+                                        return <div key={member.id} onClick={(e) => { e.stopPropagation(); openManageModal(member, 'add', date); }} className={`w-5 h-5 rounded-full text-[9px] flex items-center justify-center cursor-pointer hover:scale-125 transition-transform shadow-sm text-white ${config.circle}`} title={`${member.name}: ${config.label}`}>{member.name.charAt(0)}</div>
+                                    })}</div>
+                                </div>
+                            );
+                        })}</div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="max-w-7xl mx-auto p-4 md:p-6 pb-20">
+                    <header className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4 glass-panel p-4 rounded-2xl shadow-sm border border-white sticky top-2 z-20">
+                        <div className="flex items-center gap-3"><div className="bg-gradient-to-br from-indigo-500 to-purple-600 p-2.5 rounded-xl shadow-lg shadow-indigo-200 text-white"><LayoutGrid className="w-6 h-6" /></div><div><h1 className="text-xl font-bold text-slate-800 tracking-tight">部門動態管理</h1><p className="text-xs text-slate-500 font-medium">{viewDate.toLocaleDateString()} (V12 2026跨年版)</p></div></div>
+                        <div className="flex flex-wrap items-center gap-3 justify-center"><div className="flex bg-slate-200 p-1 rounded-xl">
+                            <button onClick={() => setCurrentView('dashboard')} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${currentView === 'dashboard' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><LayoutGrid className="w-3.5 h-3.5" /> 看板</button>
+                            <button onClick={() => setCurrentView('week')} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${currentView === 'week' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><CalendarCheck className="w-3.5 h-3.5" /> 週清單</button>
+                            <button onClick={() => setCurrentView('day')} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${currentView === 'day' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><List className="w-3.5 h-3.5" /> 日曆</button>
+                            <button onClick={() => setCurrentView('month')} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${currentView === 'month' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><CalendarDays className="w-3.5 h-3.5" /> 月曆</button>
+                        </div><div className="flex items-center bg-white border border-slate-200 rounded-xl px-2 py-1 shadow-sm"><button onClick={() => setViewDate(new Date(viewDate.setDate(viewDate.getDate() - 7)))} className="p-1 hover:bg-slate-100 rounded-lg"><ChevronLeft className="w-4 h-4 text-slate-500" /></button><div className="mx-2 flex flex-col items-center w-24"><span className="text-xs font-bold text-slate-700">{viewDate.getFullYear()}-{viewDate.getMonth() + 1}-{viewDate.getDate()}</span></div><button onClick={() => setViewDate(new Date(viewDate.setDate(viewDate.getDate() + 7)))} className="p-1 hover:bg-slate-100 rounded-lg"><ChevronRight className="w-4 h-4 text-slate-500" /></button><div className="border-l border-slate-200 pl-2 ml-2"><button onClick={() => setViewDate(new Date())} className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded hover:bg-indigo-100">本週</button></div></div></div>
+                    </header>
+                    <main>{currentView === 'dashboard' && <DashboardView />}{currentView === 'week' && <WeekView />}{currentView === 'day' && <DayView />}{currentView === 'month' && <MonthView />}</main>
+                    {isManageModalOpen && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4"><div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in duration-200 max-h-[90vh] flex flex-col"><div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50"><h3 className="font-bold text-slate-800 flex items-center gap-2">{modalMode === 'add' ? <><Plus className="w-4 h-4" /> 新增行程</> : <><CalendarRange className="w-4 h-4" /> 行程列表</>}<span className="text-slate-400 text-sm font-normal">| {targetMember?.name}</span></h3><button onClick={() => setIsManageModalOpen(false)}><X className="w-5 h-5 text-slate-400" /></button></div><div className="flex-1 overflow-y-auto p-4">{modalMode === 'add' && (<form onSubmit={saveStatus} className="space-y-4"><div className="bg-yellow-50 p-3 rounded-lg border border-yellow-100 flex items-start gap-2"><AlertCircle className="w-4 h-4 text-yellow-600 mt-0.5 flex-shrink-0" /><p className="text-xs text-yellow-700">週六、週日與國定假日為固定休假日。</p></div><div className="grid grid-cols-2 gap-2">{Object.values(STATUS_TYPES).filter(t => t.id !== 'office' && t.id !== 'break').map(type => (<button key={type.id} type="button" onClick={() => setStatusForm({...statusForm, type: type.id})} className={`flex items-center p-3 rounded-xl border text-sm font-medium transition-all ${statusForm.type === type.id ? `${type.color} ring-2 ring-offset-1 ring-indigo-500` : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}><type.icon className="w-4 h-4 mr-2" />{type.label}</button>))}</div><div className="space-y-3"><div className="grid grid-cols-2 gap-3 items-end"><div><label className="text-xs font-bold text-slate-500 block mb-1">開始日期</label><input type="date" required className="w-full p-2 bg-slate-50 border rounded-lg text-sm font-mono" value={statusForm.startDate} onChange={e => setStatusForm({...statusForm, startDate: e.target.value})} /></div><div><label className="text-xs font-bold text-slate-500 block mb-1">時間</label><select value={statusForm.startTime} onChange={e => setStatusForm({...statusForm, startTime: e.target.value})} className="w-full p-2 bg-slate-50 border rounded-lg text-sm font-mono">{TIME_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}</select></div></div><div className="grid grid-cols-2 gap-3 items-end"><div><label className="text-xs font-bold text-slate-500 block mb-1">結束日期</label><input type="date" required className="w-full p-2 bg-slate-50 border rounded-lg text-sm font-mono" value={statusForm.endDate} onChange={e => setStatusForm({...statusForm, endDate: e.target.value})} /></div><div><label className="text-xs font-bold text-slate-500 block mb-1">時間</label><select value={statusForm.endTime} onChange={e => setStatusForm({...statusForm, endTime: e.target.value})} className="w-full p-2 bg-slate-50 border rounded-lg text-sm font-mono">{TIME_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}</select></div></div></div><textarea placeholder="備註" className="w-full p-3 bg-slate-50 border rounded-lg text-sm h-16 resize-none" value={statusForm.note} onChange={e => setStatusForm({...statusForm, note: e.target.value})}></textarea><div className="flex gap-3 pt-2"><button type="button" onClick={() => setModalMode('list')} className="px-4 py-2 text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm font-bold">列表</button><button type="submit" className="flex-1 py-2 bg-indigo-600 text-white font-bold text-sm rounded-lg hover:bg-indigo-700 shadow-lg shadow-indigo-200 flex items-center justify-center"><Save className="w-4 h-4 mr-2" /> 儲存</button></div></form>)}{modalMode === 'list' && (<div><button onClick={() => setModalMode('add')} className="w-full py-2 mb-4 border border-dashed border-indigo-300 text-indigo-600 rounded-xl font-bold text-sm hover:bg-indigo-50 flex items-center justify-center gap-2"><Plus className="w-4 h-4" /> 新增行程</button><div className="space-y-2">{schedules.filter(s => s.memberId === targetMember.id).sort((a,b) => new Date(a.start) - new Date(b.start)).map(sch => (<div key={sch.id} onClick={() => loadScheduleToForm(sch)} className="p-3 rounded-xl border border-slate-200 hover:bg-slate-50 cursor-pointer flex justify-between items-center group"><div className="flex items-center gap-3"><div className={`w-2 h-2 rounded-full ${STATUS_TYPES[sch.type].circle.split(' ')[0]}`}></div><div><div className="text-sm font-bold text-slate-700">{STATUS_TYPES[sch.type].label} <span className="text-xs font-normal text-slate-500">({sch.note})</span></div><div className="text-xs text-slate-400 font-mono">{new Date(sch.start).toLocaleDateString()} {formatTime24(sch.start)} ~ {new Date(sch.end).toLocaleDateString()} {formatTime24(sch.end)}</div></div></div><button onClick={(e) => { e.stopPropagation(); deleteSchedule(sch.id); }} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full"><Trash2 className="w-4 h-4" /></button></div>))}{schedules.filter(s => s.memberId === targetMember.id).length === 0 && <div className="text-center text-xs text-slate-400 py-4">無行程</div>}</div></div>)}</div></div></div>
+                    )}
+                    {isMemberEditModalOpen && (<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4"><div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl p-6 animate-in zoom-in duration-200"><h3 className="font-bold text-lg text-slate-800 mb-4 flex items-center gap-2"><Edit3 className="w-5 h-5 text-indigo-600" /> 編輯成員資料</h3><form onSubmit={saveMemberInfo} className="space-y-4"><div><label className="text-xs font-bold text-slate-500 block mb-1">姓名</label><input type="text" required className="w-full p-2 border border-slate-300 rounded-lg" value={memberForm.name} onChange={e => setMemberForm({...memberForm, name: e.target.value})} /></div><div><label className="text-xs font-bold text-slate-500 block mb-1">職稱</label><input type="text" required className="w-full p-2 border border-slate-300 rounded-lg" value={memberForm.role} onChange={e => setMemberForm({...memberForm, role: e.target.value})} /></div><div className="flex justify-end gap-2 pt-2"><button type="button" onClick={() => setIsMemberEditModalOpen(false)} className="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded-lg text-sm">取消</button><button type="submit" className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold shadow-md hover:bg-indigo-700">更新</button></div></form></div></div>)}
+                </div>
+            );
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
