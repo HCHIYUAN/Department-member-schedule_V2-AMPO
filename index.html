@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>部門動態管理系統 V19 (獨立部署版)</title>
+    <title>部門動態管理系統 V17 (自訂標籤版)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -69,9 +69,8 @@
 
         // ==========================================
         // 🔥 設定區 (您的 Firebase 設定) 🔥
-        // 若要給其他部門使用，建議申請新的 Firebase 專案並替換此處
         // ==========================================
-        const firebaseConfig = {
+       const firebaseConfig = {
   apiKey: "AIzaSyCjFPZ3eFwCOHDh-O0FwynEPfcxaCXiSMo",
   authDomain: "ampo-schedule-v1.firebaseapp.com",
   projectId: "ampo-schedule-v1",
@@ -79,7 +78,6 @@
   messagingSenderId: "32368367144",
   appId: "1:32368367144:web:97ded59a7643d7fcb3c71d"
 };
-
         // 初始化 Firebase
         let db;
         try {
@@ -110,7 +108,7 @@
 
         const SPECIAL_TYPES = ['meeting', 'trip', 'leave'];
 
-        // 預設活動類型
+        // 🔥 預設活動類型 (Preset Event Types) 🔥
         const DEFAULT_EVENT_TYPES = {
             client: { id: 'client', label: '客戶來訪', char: '客', icon: Globe, color: 'text-teal-700 bg-teal-50 border-teal-200', badge: 'bg-teal-100 text-teal-800 border border-teal-200' },
             dinner: { id: 'dinner', label: '部門聚餐', char: '聚', icon: Utensils, color: 'text-orange-700 bg-orange-50 border-orange-200', badge: 'bg-orange-100 text-orange-800 border border-orange-200' },
@@ -119,6 +117,7 @@
             announce: { id: 'announce', label: '重要公告', char: '公', icon: Megaphone, color: 'text-slate-600 bg-slate-50 border-slate-200', badge: 'bg-slate-200 text-slate-700 border border-slate-300' },
         };
 
+        // 🔥 自訂類別的色票庫 (Color Palette) 🔥
         const COLOR_PALETTES = {
             red: { label: '紅色', color: 'text-red-700 bg-red-50 border-red-200', badge: 'bg-red-100 text-red-800 border-red-200' },
             green: { label: '綠色', color: 'text-green-700 bg-green-50 border-green-200', badge: 'bg-green-100 text-green-800 border-green-200' },
@@ -165,7 +164,7 @@
             const [members, setMembers] = useState([]);
             const [schedules, setSchedules] = useState([]);
             const [events, setEvents] = useState([]); 
-            const [customTypes, setCustomTypes] = useState([]); 
+            const [customTypes, setCustomTypes] = useState([]); // 🔥 新增：自訂類別
             const [loading, setLoading] = useState(true);
             const [dbError, setDbError] = useState(null);
 
@@ -175,7 +174,7 @@
             const [isManageModalOpen, setIsManageModalOpen] = useState(false);
             const [isMemberEditModalOpen, setIsMemberEditModalOpen] = useState(false);
             const [isEventModalOpen, setIsEventModalOpen] = useState(false); 
-            const [isTypeModalOpen, setIsTypeModalOpen] = useState(false); 
+            const [isTypeModalOpen, setIsTypeModalOpen] = useState(false); // 🔥 新增：類別管理視窗
             
             const [targetMember, setTargetMember] = useState(null); 
             const [modalMode, setModalMode] = useState('list');
@@ -183,32 +182,40 @@
             const [statusForm, setStatusForm] = useState({ id: null, type: 'meeting', startDate: '', startTime: '08:00', endDate: '', endTime: '17:00', note: '' });
             const [memberForm, setMemberForm] = useState({ name: '', role: '', birthday: '' });
             const [eventForm, setEventForm] = useState({ id: null, title: '', type: 'client', startDate: '', endDate: '', note: '' });
-            const [typeForm, setTypeForm] = useState({ label: '', char: '', colorKey: 'blue' }); 
+            const [typeForm, setTypeForm] = useState({ label: '', char: '', colorKey: 'blue' }); // 🔥 新增：類別表單
 
-            // --- Firebase 監聽 (直接監聽 Root Collection) ---
+            // --- Firebase 監聽 ---
             useEffect(() => {
                 if (!db) { setDbError("Firebase 設定錯誤。"); setLoading(false); return; }
                 const unsubMembers = onSnapshot(query(collection(db, "members"), orderBy("orderId")), (s) => {
                     setMembers(s.docs.map(doc => ({ id: doc.id, ...doc.data() }))); setLoading(false);
-                }, (error) => { setDbError("無法讀取資料庫，請確認 Firebase Rules 設為 true。"); });
+                });
                 const unsubSchedules = onSnapshot(collection(db, "schedules"), (s) => {
                     setSchedules(s.docs.map(doc => ({ id: doc.id, ...doc.data() })));
                 });
                 const unsubEvents = onSnapshot(query(collection(db, "events")), (s) => { 
                     setEvents(s.docs.map(doc => ({ id: doc.id, ...doc.data() })));
                 });
+                // 🔥 監聽自訂類別 🔥
                 const unsubTypes = onSnapshot(query(collection(db, "custom_types")), (s) => { 
                     setCustomTypes(s.docs.map(doc => ({ id: doc.id, ...doc.data() })));
                 });
                 return () => { unsubMembers(); unsubSchedules(); unsubEvents(); unsubTypes(); };
             }, []);
 
-            // 合併活動類型
+            // 🔥 合併預設與自訂類別 🔥
             const allEventTypes = useMemo(() => {
                 const combined = { ...DEFAULT_EVENT_TYPES };
                 customTypes.forEach(t => {
                     const palette = COLOR_PALETTES[t.colorKey] || COLOR_PALETTES.gray;
-                    combined[t.id] = { id: t.id, label: t.label, char: t.char, icon: Tag, color: palette.color, badge: palette.badge };
+                    combined[t.id] = {
+                        id: t.id,
+                        label: t.label,
+                        char: t.char,
+                        icon: Tag, // 自訂類別統一用 Tag 圖示
+                        color: palette.color,
+                        badge: palette.badge
+                    };
                 });
                 return combined;
             }, [customTypes]);
@@ -219,6 +226,7 @@
                 try { await batch.commit(); alert("初始化完成！"); } catch (e) { alert("初始化失敗: " + e.message); } setLoading(false);
             };
 
+            // 邏輯省略 (同上版本)
             const getMemberCurrentStatus = (memberId, time) => { const checkTime = time.getTime(); const currentSchedules = schedules.filter(s => s.memberId === memberId && new Date(s.start).getTime() <= checkTime && new Date(s.end).getTime() > checkTime); if (currentSchedules.length > 0) return { ...currentSchedules[currentSchedules.length - 1], isDefault: false }; const holidayName = isDayOff(time); if (holidayName) return { type: 'break', note: holidayName, isDefault: true }; const hour = time.getHours(); const isWorkTime = hour >= WORK_START_HOUR && hour < WORK_END_HOUR; if (isWorkTime) return { type: 'office', note: '在位子上', isDefault: true }; return { type: 'break', note: '非辦公時間', isDefault: true }; };
             const getMemberDaySchedules = (memberId, date) => schedules.filter(s => s.memberId === memberId && isDateInRange(date, s.start, s.end));
             const handleEditMember = (member) => { setTargetMember(member); setMemberForm({ name: member.name, role: member.role, birthday: member.birthday || '' }); setIsMemberEditModalOpen(true); };
@@ -241,12 +249,18 @@
             };
             const deleteEvent = async (id) => { if(confirm("確定刪除此活動?")) { await deleteDoc(doc(db, "events", id)); } };
 
+            // 🔥 新增：自訂類別管理 🔥
             const saveType = async (e) => {
                 e.preventDefault(); if(!db) return;
                 const id = 'custom_' + Date.now();
                 try { await addDoc(collection(db, "custom_types"), { id, ...typeForm }); setTypeForm({ label: '', char: '', colorKey: 'blue' }); alert("類別已新增"); } catch(err){ alert("失敗: "+err.message); }
             };
-            const deleteType = async (id) => { if(confirm("刪除此類別？")) { try { await deleteDoc(doc(db, "custom_types", id)); } catch(e){console.error(e);} }};
+            const deleteType = async (id) => { if(confirm("刪除此類別？(已使用此類別的活動可能會顯示異常)")) { const docs = customTypes.find(t=>t.id===id); if(docs) { // 需找出 firestore doc id，這裡簡化處理，實際建議 custom_types document id = type id 
+                // 由於前面 addDoc 是自動生成 ID，這裡需要查詢刪除。為求簡單，這裡假設 UI 傳入的是資料內容。
+                // 修正：應該在 fetch 時保留 doc.id
+                // 這裡重新實作 fetch logic (上方的 useEffect 已經有 id: doc.id)
+                await deleteDoc(doc(db, "custom_types", id));
+            }}};
 
             const InfoView = () => {
                 const year = viewDate.getFullYear(); const month = viewDate.getMonth() + 1;
@@ -318,6 +332,7 @@
             if (dbError) return <div className="min-h-screen flex items-center justify-center bg-slate-100 p-6"><div className="bg-white p-6 rounded-2xl shadow-xl max-w-lg text-center"><AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" /><h2 className="text-xl font-bold text-slate-800 mb-2">連線問題</h2><p className="text-slate-600 mb-4">{dbError}</p></div></div>;
             if (members.length === 0) return <div className="min-h-screen flex items-center justify-center bg-slate-100"><div className="bg-white p-8 rounded-2xl shadow-xl text-center"><Cloud className="w-16 h-16 text-indigo-500 mx-auto mb-4" /><h2 className="text-2xl font-bold text-slate-800 mb-2">系統就緒</h2><p className="text-slate-500 mb-6">資料庫是空的，請初始化。</p><button onClick={initializeDb} className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-lg hover:bg-indigo-700 transition flex items-center mx-auto gap-2"><RefreshCw className="w-5 h-5" /> 建立 12 位成員</button></div></div>;
 
+            // ... DashboardView, DayView, WeekView (省略，內容同上) ...
             const DashboardView = () => (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in fade-in zoom-in duration-300">
                     {members.map(member => {
@@ -432,7 +447,7 @@
             return (
                 <div className="max-w-7xl mx-auto p-4 md:p-6 pb-20">
                     <header className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4 glass-panel p-4 rounded-2xl shadow-sm border border-white sticky top-2 z-20">
-                        <div className="flex items-center gap-3"><div className="bg-gradient-to-br from-indigo-500 to-purple-600 p-2.5 rounded-xl shadow-lg shadow-indigo-200 text-white"><LayoutGrid className="w-6 h-6" /></div><div><h1 className="text-xl font-bold text-slate-800 tracking-tight">部門動態管理</h1><p className="text-xs text-slate-500 font-medium">{viewDate.toLocaleDateString()} (V19 獨立部署版)</p></div></div>
+                        <div className="flex items-center gap-3"><div className="bg-gradient-to-br from-indigo-500 to-purple-600 p-2.5 rounded-xl shadow-lg shadow-indigo-200 text-white"><LayoutGrid className="w-6 h-6" /></div><div><h1 className="text-xl font-bold text-slate-800 tracking-tight">部門動態管理</h1><p className="text-xs text-slate-500 font-medium">{viewDate.toLocaleDateString()} (V17 自訂標籤)</p></div></div>
                         <div className="flex flex-wrap items-center gap-3 justify-center"><div className="flex bg-slate-200 p-1 rounded-xl">
                             <button onClick={() => setCurrentView('dashboard')} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${currentView === 'dashboard' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><LayoutGrid className="w-3.5 h-3.5" /> 看板</button>
                             <button onClick={() => setCurrentView('week')} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${currentView === 'week' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><CalendarCheck className="w-3.5 h-3.5" /> 週清單</button>
